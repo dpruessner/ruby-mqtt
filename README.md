@@ -1,4 +1,14 @@
-[![Build Status](https://travis-ci.org/njh/ruby-mqtt.svg)](https://travis-ci.org/njh/ruby-mqtt)
+VARIANT
+========
+
+This is a Sprinkl variant of njh's ruby-mqtt.  It's an excellent library in pure-ruby.  But it does a few
+odd things with threads (particularly calling `Thread#raise` on an assumed parent thread).
+
+Our project uses MQTT in a threaded Promise based system.  So calling `Thread#raise` is very dangerous.
+
+The *feature/promise-friendly* branch here makes changes in the `Client#get` and associated thread-safe
+structures to make sure Exceptions don't show up from nowhere-- and that other threads that may be
+waiting are not left hanging on socket/protocol errors.
 
 ruby-mqtt
 =========
