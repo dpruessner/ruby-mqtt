@@ -182,7 +182,11 @@ class MQTT::Client
     @read_thread = nil
     @write_semaphore = Mutex.new
     @pubacks_semaphore = Mutex.new
+
+    @get_thread_exception = nil
   end
+
+  attr_reader :get_thread_exception
 
   # Get the OpenSSL context, that is used if SSL/TLS is enabled
   def ssl_context
@@ -399,7 +403,10 @@ class MQTT::Client
   #     # Do stuff here
   #   end
   #
-  def get(topic=nil, options={})
+  #
+  # @param [bool] nonblock if set to `true`, this function will return `nil` immediately if no packet is available.
+  #
+  def get(topic=nil, nonblock=false, options={})
     if block_given?
       get_packet(topic) do |packet|
         yield(packet.topic, packet.payload) unless packet.retain && options[:omit_retained]
@@ -407,7 +414,8 @@ class MQTT::Client
     else
       loop do
         # Wait for one packet to be available
-        packet = get_packet(topic)
+        packet = get_packet(topic, nonblock)
+        return nil if packet.nil?
         return packet.topic, packet.payload unless packet.retain && options[:omit_retained]
       end
     end
@@ -426,7 +434,7 @@ class MQTT::Client
   #     puts packet.topic
   #   end
   #
-  def get_packet(topic=nil)
+  def get_packet(topic=nil, nonblock=false)
     # Subscribe to a topic, if an argument is given
     subscribe(topic) unless topic.nil?
 
@@ -438,9 +446,17 @@ class MQTT::Client
         puback_packet(packet) if packet.qos > 0
       end
     else
+      # Return immediately if no data in the queue and call is non-blocking
+      return nil if @read_queue.length == 0 if nonblock
+
       # Wait for one packet to be available
       packet = @read_queue.pop
-      puback_packet(packet) if packet.qos > 0
+      puts "@@MQTT: PACKET nil" if packet.nil?
+      if packet
+        puback_packet(packet) if packet.qos > 0
+      else
+        puts "@@MQTT: @read_queue is closed!" if @read_queue.closed?
+      end
       return packet
     end
   end
@@ -487,8 +503,11 @@ private
       unless @socket.nil?
         @socket.close
         @socket = nil
+        # Alert anyone waiting on a read_queue message that it's not coming...
+        @read_queue.close
       end
-      Thread.current[:parent].raise(exp)
+      @get_thread_exception = exp
+      # Thread.current[:parent].raise(exp)              # Don't do this. It's not helpful. \DP\
     end
   end
 
